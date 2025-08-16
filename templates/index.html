@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MIDI Chord Trainer — Sleek UI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --muted:#94a3b8;
+      --accent:#7c3aed;
+      --accent-2:#06b6d4;
+      --glass: rgba(255,255,255,0.04);
+      --radius:16px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
+      background: radial-gradient(1200px 400px at 10% 10%, rgba(124,58,237,0.08), transparent),
+                  linear-gradient(180deg, rgba(6,182,212,0.02), rgba(255,255,255,0.01));
+      background-color:var(--bg);
+      color:#e6eef8;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:32px;
+    }
+    .card{
+      width:100%;
+      max-width:600px;
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:var(--radius);
+      padding:28px;
+      box-shadow: 0 10px 30px rgba(2,6,23,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+      border:1px solid rgba(255,255,255,0.03);
+    }
+    h1{margin:0; font-size:20px; letter-spacing:-0.02em; font-weight:700; color:#f8fafc;}
+    .chord-display{background:var(--glass); border-radius:12px; padding:22px; display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin-top:18px}
+    .chord-name{font-size:28px; font-weight:800; color:var(--accent); margin:0;}
+    .chord-notes{color:var(--muted); margin:0; font-weight:500}
+    .big-stats{display:flex; gap:12px; align-items:center; margin-top:6px}
+    .stat{background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); padding:10px 14px; border-radius:10px; min-width:90px; text-align:center; border:1px solid rgba(255,255,255,0.02);}
+    .stat .value{font-weight:800; font-size:18px}
+    .stat .label{font-size:12px; color:var(--muted)}
+    .progress-wrap{margin-top:10px}
+    .progress{width:100%; height:12px; border-radius:999px; background:rgba(255,255,255,0.03); overflow:hidden; border:1px solid rgba(255,255,255,0.02);}
+    .progress > i{display:block; height:100%; width:100%; transform-origin:left; background: linear-gradient(90deg,var(--accent), var(--accent-2)); transition:width 0.2s linear}
+    .controls{display:flex; gap:10px; margin-top:12px}
+    button.primary{background: linear-gradient(90deg,var(--accent), #5b21b6); border: none; color:white; padding:10px 16px; border-radius:10px; font-weight:700; cursor:pointer; box-shadow: 0 6px 20px rgba(124,58,237,0.14);}
+    button.ghost{background:transparent; border:1px solid rgba(255,255,255,0.06); color:var(--muted); padding:10px 14px; border-radius:10px; cursor:pointer;}
+    footer{grid-column:1/-1; text-align:center; color:var(--muted); font-size:13px; margin-top:8px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>MIDI Chord Trainer</h1>
+    <div style="color:var(--muted); font-size:13px; margin-top:6px">Hit the chord on your MIDI keyboard to score points — faster is better.</div>
+
+    <div class="chord-display">
+      <div class="chord-name" id="chord-name">—</div>
+      <div class="chord-notes" id="chord-notes">—</div>
+      <div class="big-stats">
+        <div class="stat"><div class="value" id="score">0</div><div class="label">Score</div></div>
+        <div class="stat"><div class="value" id="time-left">60s</div><div class="label">Time left</div></div>
+        <div class="stat"><div class="value" id="current-points">+0</div><div class="label">Last points</div></div>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress" aria-hidden="true"><i id="progress-bar" style="width:100%"></i></div>
+      </div>
+      <div class="controls">
+        <button class="primary" id="startBtn">Start Session</button>
+        <button class="ghost" id="resetBtn">Reset</button>
+      </div>
+    </div>
+    <footer>Made with ♫ — MIDI Chord Trainer</footer>
+  </div>
+
+  <script>
+    let evtSource = null;
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const timeLimit = 60;
+
+    startBtn.addEventListener('click', startSession);
+    resetBtn.addEventListener('click', resetSession);
+
+    function startSession(){
+      if(evtSource) return;
+      fetch('/start_session').then(r=>{
+        if(!r.ok) return r.text().then(t=>{throw new Error(t)});
+        startSSE();
+        startBtn.disabled=true;
+      }).catch(e=>alert('Could not start session: '+e.message));
+    }
+
+    function startSSE(){
+      evtSource = new EventSource('/stream');
+      evtSource.onmessage = e=>{
+        try{
+          const data = JSON.parse(e.data);
+          if(data.status==='end'){ endSession(data.score); return; }
+          updateUI(data);
+        }catch(err){console.warn('Bad SSE payload',err,e.data);}
+      };
+      evtSource.onerror = cleanupSSE;
+    }
+
+    function updateUI(data){
+      document.getElementById('chord-name').innerText = data.chord_name||'—';
+      document.getElementById('chord-notes').innerText = (data.chord_notes||[]).join(', ');
+      document.getElementById('score').innerText = data.score;
+      document.getElementById('time-left').innerText = data.time_left+'s';
+      document.getElementById('progress-bar').style.width = (data.time_left/timeLimit*100)+'%';
+      if(typeof data.last_points!=='undefined') document.getElementById('current-points').innerText=(data.last_points>0?'+':'')+data.last_points;
+    }
+
+    function endSession(score){
+      alert(`Time's up! Final score: ${score}`);
+      cleanupSSE();
+      startBtn.disabled=false;
+    }
+
+    function cleanupSSE(){
+      if(evtSource){evtSource.close();evtSource=null;}
+    }
+
+    function resetSession(){
+      // Stop any ongoing session
+      fetch('/stop_session', {method:'POST'}).catch(()=>{});
+      cleanupSSE();
+      // Reset UI values
+      document.getElementById('chord-name').innerText='—';
+      document.getElementById('chord-notes').innerText='—';
+      document.getElementById('score').innerText='0';
+      document.getElementById('time-left').innerText=timeLimit+'s';
+      document.getElementById('progress-bar').style.width='100%';
+      document.getElementById('current-points').innerText='+0';
+      startBtn.disabled=false;
+    }
+  </script>
+</body>
+</html>
